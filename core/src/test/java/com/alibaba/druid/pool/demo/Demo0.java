@@ -16,6 +16,8 @@
 package com.alibaba.druid.pool.demo;
 
 import java.sql.Connection;
+import java.util.ArrayList;
+import java.util.List;
 
 import junit.framework.TestCase;
 
@@ -27,7 +29,7 @@ public class Demo0 extends TestCase {
     private String user;
     private String password;
     private String driverClass;
-    private int initialSize = 10;
+    private int initialSize = 2;
     private int minIdle = 1;
     private int maxIdle = 5;
     private int maxActive = 12;
@@ -57,8 +59,14 @@ public class Demo0 extends TestCase {
         dataSource.setValidationQuery("SELECT 1");
         dataSource.setTestOnBorrow(true);
 
-        Connection conn = dataSource.getConnection();
-        conn.close();
+        List<Connection> list = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            Connection conn = dataSource.getConnection();
+            list.add(conn);
+        }
+        for (Connection conn : list) {
+            conn.close();
+        }
 
         System.out.println();
     }

@@ -247,12 +247,18 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
         }
 
         DruidAbstractDataSource dataSource = holder.getDataSource();
+        // 判断归还连接的线程和获取连接的线程是否是同一个线程
         boolean isSameThread = this.ownerThread == Thread.currentThread();
 
+        // 如果不是同一个线程，则设置asyncCloseConnectionEnable为true
         if (!isSameThread) {
             dataSource.setAsyncCloseConnectionEnable(true);
         }
 
+        // 如果开启了removeAbandoned机制
+        // 或者asyncCloseConnectionEnable为true
+        // 则调用syncClose()方法来归还连接
+        // syncClose()方法中会先加锁，然后调用recycle()方法来回收连接
         if (dataSource.removeAbandoned || dataSource.asyncCloseConnectionEnable) {
             syncClose();
             return;
@@ -278,6 +284,7 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
                     holder.recycleFilterChain(filterChain);
                 }
             } else {
+                // 回收连接
                 recycle();
             }
         } finally {
@@ -340,6 +347,7 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
         }
 
         if (!this.abandoned) {
+            // 调用DruidAbstractDataSource#recycle回收当前连接
             holder.dataSource.recycle(this);
         }
 
