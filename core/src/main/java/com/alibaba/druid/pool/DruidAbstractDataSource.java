@@ -237,8 +237,8 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
     protected boolean useOracleImplicitCache = true;
 
     protected ReentrantLock lock;
-    protected Condition notEmpty;
-    protected Condition empty;
+    protected Condition notEmpty;       // 连接池中不为空的通知
+    protected Condition empty;          // 连接池中为空的通知
 
     protected ReentrantLock activeConnectionLock = new ReentrantLock();
 

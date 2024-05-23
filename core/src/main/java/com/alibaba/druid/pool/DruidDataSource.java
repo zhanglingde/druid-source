@@ -918,7 +918,7 @@ public class DruidDataSource extends DruidAbstractDataSource
                     submitCreateTask(true);
                 }
             } else if (!asyncInit) {
-                // init connections 根据配置初始化连接数量
+                // 1. init connections 根据配置初始化连接数量
                 while (poolingCount < initialSize) {
                     try {
                         PhysicalConnectionInfo pyConnectInfo = createPhysicalConnection();
@@ -941,6 +941,7 @@ public class DruidDataSource extends DruidAbstractDataSource
                 }
             }
 
+            // 2. 创建异步创建连接的线程并启动，然后用 CountDownLatch 阻塞住，后续唤醒创建连接
             createAndLogThread();
             createAndStartCreatorThread();
             createAndStartDestroyThread();
@@ -1500,7 +1501,7 @@ public class DruidDataSource extends DruidAbstractDataSource
             // handle notFullTimeoutRetry
             DruidPooledConnection poolableConnection;
             try {
-                // 从连接池获取连接
+                // 1. 从连接池获取连接
                 poolableConnection = getConnectionInternal(maxWaitMillis);
             } catch (GetConnectionTimeoutException ex) {
                 // 拿连接时有异常，可以重试
@@ -1515,7 +1516,7 @@ public class DruidDataSource extends DruidAbstractDataSource
                 throw ex;
             }
 
-            // 如果配置了testOnBorrow = true，那么每次拿到连接后，都需要校验这个连接的有效性
+            // 2. 如果配置了testOnBorrow = true，那么每次拿到连接后，都需要校验这个连接的有效性
             if (testOnBorrow) {
                 boolean validated = testConnectionInternal(poolableConnection.holder, poolableConnection.conn);
                 // 如果连接不可用，则销毁连接，然后重新从池中获取
@@ -1693,6 +1694,12 @@ public class DruidDataSource extends DruidAbstractDataSource
         return emptySignalCalled;
     }
 
+    /**
+     * 连接池获取连接核心逻辑
+     * @param maxWait
+     * @return
+     * @throws SQLException
+     */
     private DruidPooledConnection getConnectionInternal(long maxWait) throws SQLException {
         if (closed) {
             connectErrorCountUpdater.incrementAndGet(this);
@@ -1715,10 +1722,10 @@ public class DruidDataSource extends DruidAbstractDataSource
 
         long startTime = System.currentTimeMillis();  //进入循环等待之前，先记录开始尝试获取连接的时间
         final long expiredTime = startTime + maxWait;
-        // 在死循环中从连接池拿连接
-        // 一开始createDirect为false，表示先从池子中拿
+
+        // 1. 先中连接池中拿；createDirect 为 true 表示连接池中没有连接，需要同步创建连接
         for (boolean createDirect = false; ; ) {
-            if (createDirect) {  // 1. 同步直接创建连接
+            if (createDirect) {
                 try {
                     createStartNanosUpdater.set(this, System.nanoTime());
                     // creatingCount 为 0 表示当前没有其它连接正在被创建
@@ -1762,7 +1769,8 @@ public class DruidDataSource extends DruidAbstractDataSource
                 }
             }
 
-            final ReentrantLock lock = this.lock;  // 上锁
+            // 2. 加锁从连接池中获取连接
+            final ReentrantLock lock = this.lock;
             try {
                 lock.lockInterruptibly();
             } catch (InterruptedException e) {
@@ -1774,11 +1782,9 @@ public class DruidDataSource extends DruidAbstractDataSource
                 // maxWaitThreadCount 表示允许的最大等待连接的应用线程数
                 // notEmptyWaitThreadCount 表示正在等待连接的应用线程数
                 // 等待连接的应用线程数达到最大值时，抛出异常
-                if (maxWaitThreadCount > 0
-                        && notEmptyWaitThreadCount > maxWaitThreadCount) {
+                if (maxWaitThreadCount > 0 && notEmptyWaitThreadCount > maxWaitThreadCount) {
                     connectErrorCountUpdater.incrementAndGet(this);
-                    throw new SQLException("maxWaitThreadCount " + maxWaitThreadCount + ", current wait Thread count "
-                            + lock.getQueueLength());
+                    throw new SQLException("maxWaitThreadCount " + maxWaitThreadCount + ", current wait Thread count " + lock.getQueueLength());
                 }
 
                 // 发生了致命错误，且设置了致命错误数最大值大于0，且正在使用的连接数大于等于致命错误数最大值
@@ -1806,8 +1812,7 @@ public class DruidDataSource extends DruidAbstractDataSource
                                 .append(lastFatalErrorSql);
                     }
 
-                    throw new SQLException(
-                            errorMsg.toString(), lastFatalError);
+                    throw new SQLException(errorMsg.toString(), lastFatalError);
                 }
 
                 connectCount++;
@@ -1817,6 +1822,7 @@ public class DruidDataSource extends DruidAbstractDataSource
                 // 且当前借出的连接数未达到允许的最大连接数
                 // 且当前没有其它线程（应用线程，创建连接的线程，创建连接的线程池里的线程）在创建连接
                 // 此时将 createDirect 置为true，让当前应用线程直接创建连接
+                // 3. 同步创建连接的条件
                 if (createScheduler != null
                         && poolingCount == 0
                         && activeCount < maxActive
@@ -1835,6 +1841,7 @@ public class DruidDataSource extends DruidAbstractDataSource
                     }
                 }
 
+                // 4. 从连接池中获取连接，取最后一个连接
                 if (maxWait > 0) {
                     // 如果设置了等待连接的最大等待时间，则调用pollLast()方法来拿连接
                     // pollLast() 方法执行时如果池中没有连接，则应用线程会在 notEmpty 上最多等待maxWait的时间
@@ -1849,7 +1856,7 @@ public class DruidDataSource extends DruidAbstractDataSource
                     // 取最后一个连接
                     holder = takeLast(startTime);
                 }
-                // 相关统计的计算
+                // 5. 相关统计的计算
                 if (holder != null) {
                     if (holder.discard) {
                         holder = null;
@@ -2081,8 +2088,7 @@ public class DruidDataSource extends DruidAbstractDataSource
 
         if (logDifferentThread //
                 && (!asyncCloseConnectionEnable) //
-                && !isSameThread
-        ) {
+                && !isSameThread) {
             LOG.warn("get/close not same thread");
         }
 
@@ -2393,13 +2399,16 @@ public class DruidDataSource extends DruidAbstractDataSource
         return pollLast(startTime, 0);
     }
 
+    /**
+     * 从连接池中获取 最后一个连接
+     */
     private DruidConnectionHolder pollLast(long startTime, long expiredTime) throws InterruptedException, SQLException {
         try {
             long awaitStartTime;
             long estimate = 0;
             while (poolingCount == 0) {
                 // send signal to CreateThread create connection
-                // 如果池中已经没有连接，则唤醒在empty上等待的创建连接线程来创建连接
+                // 1. 如果池中已经没有连接，则唤醒在 empty 上等待的创建连接线程来创建连接
                 emptySignal();
 
                 if (failFast && isFailContinuous()) {
@@ -2414,15 +2423,13 @@ public class DruidDataSource extends DruidAbstractDataSource
                     }
                 }
 
-                // 应用线程即将在下面的notEmpty上等待
-                // 这里先把等待获取连接的应用线程数加1
+                // 这里先把等待获取连接的应用线程数加 1
                 notEmptyWaitThreadCount++;
                 if (notEmptyWaitThreadCount > notEmptyWaitThreadPeak) {
                     notEmptyWaitThreadPeak = notEmptyWaitThreadCount;
                 }
                 try {
-                    // 应用线程在notEmpty上等待
-                    // 有连接被创建或者被归还时，会唤醒在notEmpty上等待的应用线程
+                    // 2. 应用线程在 notEmpty 上等待（有连接被创建或者被归还时，会唤醒在notEmpty上等待的应用线程）
                     // signal by recycle or creator
                     if (estimate == 0) {
                         notEmpty.await();
@@ -2451,8 +2458,8 @@ public class DruidDataSource extends DruidAbstractDataSource
             throw ie;
         }
 
+        // 3. 从连接池中尾部拿到连接，更新线程连接个数
         decrementPoolingCount();  // poolingCount--
-        // 从池中拿到连接
         DruidConnectionHolder last = connections[poolingCount];
         connections[poolingCount] = null;
 
