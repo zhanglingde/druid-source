@@ -721,6 +721,7 @@ public class StatFilter extends FilterEventAdapter implements StatFilterMBean {
     @Override
     public DruidPooledConnection dataSource_getConnection(FilterChain chain, DruidDataSource dataSource,
                                                           long maxWaitMillis) throws SQLException {
+        // 这里又回到 FilterChainImpl.dataSource_connect方法
         DruidPooledConnection conn = chain.dataSource_connect(dataSource, maxWaitMillis);
 
         if (conn != null) {
