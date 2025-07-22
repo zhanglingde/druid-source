@@ -2131,14 +2131,13 @@ public class DruidDataSource extends DruidAbstractDataSource
 
         try {
             // check need to rollback?
-            // 如果是非自动提交且存在事务
-            // 则回滚事务
+            // 1. 如果是非自动提交且存在事务,则回滚事务
             if ((!isAutoCommit) && (!isReadOnly)) {
                 pooledConnection.rollback();
             }
 
             // reset holder, restore default settings, clear warnings
-            // 重置连接信息（配置还原为默认值，关闭Statement，清除连接的Warnings等）
+            // 2. 重置连接信息（配置还原为默认值，关闭Statement，清除连接的Warnings等）
             if (!isSameThread) {
                 final ReentrantLock lock = pooledConnection.lock;
                 lock.lock();
@@ -2174,7 +2173,7 @@ public class DruidDataSource extends DruidAbstractDataSource
                 return;
             }
 
-            // 开启了testOnReturn机制，则校验连接有效性
+            // 3. 开启了testOnReturn机制，则校验连接有效性
             if (testOnReturn) {
                 boolean validated = testConnectionInternal(holder, physicalConnection);
                 // 校验不通过则关闭物理连接
@@ -2185,7 +2184,7 @@ public class DruidDataSource extends DruidAbstractDataSource
 
                     lock.lock();
                     try {
-                        // 连接即将放回连接池，需要将active设置为false
+                        // 连接即将放回连接池，需要将 active 设置为false
                         if (holder.active) {
                             activeCount--;
                             holder.active = false;
@@ -2220,14 +2219,14 @@ public class DruidDataSource extends DruidAbstractDataSource
 
             lock.lock();
             try {
+                // 4. 连接即将放回连接池，需要将active设置为false
                 if (holder.active) {
                     activeCount--;
                     holder.active = false;
                 }
                 closeCount++;
 
-                // 将连接放到 connections 数组的 poolingCount 位置
-                // 然后 poolingCount 加 1
+                // 5. 将连接放到 connections 数组的 poolingCount 位置,然后 poolingCount 加 1
                 // 然后唤醒在 notEmpty 上等待连接的一个应用线程
                 result = putLast(holder, currentTimeMillis);
                 recycleCount++;
@@ -3087,7 +3086,8 @@ public class DruidDataSource extends DruidAbstractDataSource
                     if (closed || closing) {
                         break;
                     }
-
+                    //  每隔 timeBetweenEvictionRunsMillis 时间遍历一次 activeConnections 活跃连接 map，
+                    //  一旦有活跃连接被借出的时间大于了 removeAbandonedTimeoutMillis，那么该线程就会主动去回收这个连接，以防止连接泄漏
                     if (timeBetweenEvictionRunsMillis > 0) {
                         Thread.sleep(timeBetweenEvictionRunsMillis);
                     } else {

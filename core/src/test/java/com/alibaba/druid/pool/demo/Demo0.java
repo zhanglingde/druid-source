@@ -58,6 +58,8 @@ public class Demo0 extends TestCase {
         dataSource.setPassword(password);
         dataSource.setValidationQuery("SELECT 1");
         dataSource.setTestOnBorrow(true);
+        dataSource.setFilters("stat,wall,log4j2");
+
 
         List<Connection> list = new ArrayList<>();
         for (int i = 0; i < 3; i++) {

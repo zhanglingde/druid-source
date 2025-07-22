@@ -232,6 +232,10 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
         return disable;
     }
 
+    /**
+     * 连接对象归还
+     * @throws SQLException
+     */
     @Override
     public void close() throws SQLException {
         if (this.disable) {
@@ -250,20 +254,19 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
         // 判断归还连接的线程和获取连接的线程是否是同一个线程
         boolean isSameThread = this.ownerThread == Thread.currentThread();
 
-        // 如果不是同一个线程，则设置asyncCloseConnectionEnable为true
+        // 1. 如果不是同一个线程，则设置 asyncCloseConnectionEnable 为 true
         if (!isSameThread) {
             dataSource.setAsyncCloseConnectionEnable(true);
         }
 
-        // 如果开启了removeAbandoned机制
-        // 或者asyncCloseConnectionEnable为true
-        // 则调用syncClose()方法来归还连接
-        // syncClose()方法中会先加锁，然后调用recycle()方法来回收连接
+        // 如果开启了 removeAbandoned 机制 或者 asyncCloseConnectionEnable 为 true
+        // 2. 则调用syncClose()方法来归还连接,syncClose()方法中会先加锁，然后调用recycle()方法来回收连接
         if (dataSource.removeAbandoned || dataSource.asyncCloseConnectionEnable) {
-            syncClose();
+            syncClose();    // 先加锁，防止多个线程同时关闭连接
             return;
         }
 
+        // 3. CAS 判断是否能关闭，更新成功保证只有一个线程能成功进入回收逻辑，不需要加锁
         if (!CLOSING_UPDATER.compareAndSet(this, 0, 1)) {
             return;
         }
@@ -297,6 +300,7 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
     public void syncClose() throws SQLException {
         lock.lock();
         try {
+            // 检查当前连接是否已关闭
             if (this.disable || CLOSING_UPDATER.get(this) != 0) {
                 return;
             }
@@ -347,7 +351,7 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
         }
 
         if (!this.abandoned) {
-            // 调用DruidAbstractDataSource#recycle回收当前连接
+            // 调用 DruidAbstractDataSource#recycle 回收当前连接
             holder.dataSource.recycle(this);
         }
 
